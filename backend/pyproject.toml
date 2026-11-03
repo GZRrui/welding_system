@@ -1,0 +1,12 @@
+[project]
+name = "welding-system"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["fastapi", "uvicorn", "sqlalchemy>=2", "alembic", "pydantic>=2", "numpy", "pandas", "scikit-learn", "xgboost", "joblib"]
+[tool.pytest.ini_options]
+pythonpath = ["."]
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ['E4','E7','E9','F']

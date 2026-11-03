@@ -1,0 +1,14 @@
+import { defineStore } from "pinia";
+export const useState = defineStore("work", {
+  state: () => ({
+    model: "enhanced",
+    page: "overview",
+    current: {
+      current_A: 210,
+      voltage_V: 27.2,
+      ambient_C: 80,
+      speed_m_s: 0.006,
+      process_order: 1,
+    },
+  }),
+});

@@ -1,0 +1,1 @@
+import {expect,test} from 'vitest';import {display,toM,toMM} from '../src/units';test('SI conversions preserve precision',()=>{expect(toMM(0.0001)).toBe(0.1);expect(toM(6)).toBe(0.006);expect(toMM(toM(4))).toBe(4);expect(display('total_eqv_strain_max',0.03)).toBe(0.03)});

@@ -1,0 +1,125 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #f3f6fa;
+  color: #26374b;
+  font-family: "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+}
+header {
+  height: 72px;
+  background: #fff;
+  border-bottom: 1px solid #dbe3ed;
+  padding: 22px 30px;
+  display: flex;
+  justify-content: space-between;
+}
+header b {
+  font-size: 22px;
+  color: #173c68;
+}
+header span {
+  color: #6b7889;
+}
+.shell {
+  display: flex;
+  min-height: calc(100vh - 110px);
+}
+aside {
+  width: 210px;
+  padding: 25px 14px;
+  background: #eaf0f7;
+  flex-shrink: 0;
+}
+aside button {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 15px;
+  text-align: left;
+  background: transparent;
+  color: #364f6d;
+  cursor: pointer;
+  border-radius: 5px;
+  margin-bottom: 6px;
+}
+aside button.active {
+  background: #204f83;
+  color: white;
+}
+aside p {
+  padding: 14px;
+  font-size: 12px;
+  line-height: 2;
+  color: #6b7889;
+}
+main {
+  padding: 24px 30px;
+  min-width: 0;
+  flex: 1;
+  max-width: 1700px;
+}
+h1 {
+  font-size: 23px;
+  margin: 0 0 20px;
+}
+h2 {
+  font-size: 17px;
+}
+p {
+  line-height: 1.8;
+}
+.panel {
+  background: white;
+  border: 1px solid #e0e6ed;
+  border-radius: 6px;
+  padding: 22px;
+  margin-top: 20px;
+}
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 160px;
+}
+.el-select {
+  width: 185px;
+}
+.stats {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+}
+.stats strong {
+  font-size: 26px;
+  color: #204f83;
+}
+.review {
+  display: flex;
+  gap: 12px;
+  margin: 14px 0;
+}
+.review span {
+  max-width: 130px;
+  overflow: hidden;
+}
+footer {
+  padding: 12px 30px;
+  font-size: 12px;
+  color: #6c7c8c;
+  background: white;
+}
+a {
+  color: #245c98;
+}
+pre {
+  white-space: pre-wrap;
+}
