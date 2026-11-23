@@ -1,22 +1,30 @@
 """Trusted source adapter. Resolve original modules once, without mutating sys.path."""
 
-from pathlib import Path
 import hashlib
 import importlib.util
 import json
 import sys
 from functools import lru_cache
+from pathlib import Path
 
 import pandas as pd
 
-from app.core import SOURCE
+from app.core import MANIFEST_SHA256, PACKAGE_ROOT, SOURCE
+from app.model_release import TOLERANCE, verify
+
+RELEASE = verify(SOURCE, MANIFEST_SHA256) if PACKAGE_ROOT else None
 
 
 def module(name):
-    spec = importlib.util.spec_from_file_location(name, SOURCE / (name + ".py"))
+    source = SOURCE / (name + ".py")
+    spec = importlib.util.spec_from_file_location(name, source)
     obj = importlib.util.module_from_spec(spec)
     sys.modules[name] = obj
-    spec.loader.exec_module(obj)
+    if RELEASE:
+        # Execute the verified source directly, without consulting a bytecode cache.
+        exec(compile(source.read_bytes(), str(source), "exec"), obj.__dict__)
+    else:
+        spec.loader.exec_module(obj)
     return obj
 
 
@@ -24,8 +32,8 @@ w = module("welding")
 module("validate")
 module("enhanced")
 decision = module("decision")
-RUNS = {"enhanced": "enhanced_20261103_152620", "baseline": "20261103_145522_273665"}
-TOL = json.loads((SOURCE / "configs/engineering_tolerances.json").read_text(encoding="utf-8"))
+RUNS = RELEASE["runs"] if RELEASE else {"enhanced": "enhanced_20261103_152620", "baseline": "20261103_145522_273665"}
+TOL = json.loads((SOURCE / TOLERANCE).read_text(encoding="utf-8"))
 TV = "project_v1-" + hashlib.sha256(json.dumps(TOL, sort_keys=True).encode()).hexdigest()[:12]
 LIMITS = {
     "max_displacement_m": TOL["residual_displacement_limit"] / 1000,
@@ -38,6 +46,17 @@ def run(version):
     if version not in RUNS:
         raise ValueError("未知模型版本")
     return SOURCE / "artifacts/runs" / RUNS[version]
+
+
+if RELEASE:
+    original_load_bundle = w.load_bundle
+    released_datasets = {run(key): SOURCE / RELEASE["datasets"][key] for key in RUNS}
+
+    def release_bundle(path):
+        loaded = original_load_bundle(path)
+        return dict(loaded, dataset=str(released_datasets[Path(path).resolve()]))
+
+    w.load_bundle = release_bundle
 
 
 @lru_cache(maxsize=2)

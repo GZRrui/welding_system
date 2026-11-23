@@ -1,10 +1,10 @@
 # 薄板焊接预测与工艺决策系统
 
-本地前后端分离原型，默认增强候选模型，支持旧模型对照。原算法目录只读，不复制数据、不训练模型。
+v0.2 内网部署版默认使用增强模型，也支持旧模型对照。Linux 交付使用只读模型发布包，Windows Demo 可继续读取原算法目录。
 
 详细步骤、逐页操作和排错见 [本地使用手册](docs/user_guide.md)。日常使用无需重复安装依赖。
 
-下一版为 [v0.2 内网部署版](docs/v0.2.md)。
+[Linux 安装、升级和恢复](docs/deploy.md) · [v0.2 管理员与迁移说明](docs/v0.2.md)
 
 ## 启动
 
@@ -23,7 +23,7 @@ powershell -ExecutionPolicy Bypass -File scripts/start.ps1
 
 访问 http://127.0.0.1:5173 ，OpenAPI http://127.0.0.1:8000/docs 。停止使用 `scripts/stop.ps1`，只停止脚本登记的进程。日志 `runtime/logs`，数据库 `runtime/db/system.db`，导出 `runtime/exports/<任务UUID>`。启动前确保8000/5173空闲，禁止同一数据库多实例运行。
 
-环境变量见 `.env.example`（示例文件不自动加载，需设置进程环境变量）。数据库连接由 SQLAlchemy 管理；PostgreSQL 设置 DATABASE_URL 并安装 psycopg，需在目标环境另行验证。原算法目录通过 ALGORITHM_ROOT 单点配置。
+环境变量见 `.env.example`（示例文件不自动加载，需设置进程环境变量）。本地缺省使用 SQLite，通过 DATABASE_URL 连接 PostgreSQL。Windows Demo 的原算法目录由 ALGORITHM_ROOT 配置。
 
 验证：后端 `python -m pytest`、`python -m ruff check app tests`；前端 `npm run build`、`npm test`、`npm run lint`。
 

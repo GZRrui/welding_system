@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -83,8 +85,6 @@ def test_search_limits_and_budget():
 
 
 def test_async_decision_no_solution(client):
-    import time
-
     current = dict(CURRENT, current_A=240, voltage_V=30.4, ambient_C=140, speed_m_s=0.004)
     req = {
         "current": current,
@@ -95,13 +95,41 @@ def test_async_decision_no_solution(client):
     response = client.post("/api/v1/tasks", json=req)
     assert response.status_code == 202
     rid = response.json()["id"]
-    for _ in range(100):
-        result = client.get("/api/v1/tasks/" + rid).json()
-        if result["status"] not in ["queued", "running"]:
-            break
-        time.sleep(0.05)
+    result = wait_task(client, rid)
     assert result["status"] == "completed", result
     assert result["result"]["manifest"]["evaluated"] == 1
     assert not result["result"]["recommendations"]
     assert "无可行解" in result["result"]["message"]
     assert client.get("/api/v1/tasks/" + rid + "/exports/recommendations").status_code == 200
+
+
+def wait_task(client, rid):
+    deadline = time.monotonic() + 30
+    while True:
+        result = client.get("/api/v1/tasks/" + rid).json()
+        if result["status"] not in {"queued", "running"} or time.monotonic() >= deadline:
+            return result
+        time.sleep(0.1)
+
+
+def test_retry_preserves_timed_out_task(client, monkeypatch):
+    req = {
+        "current": CURRENT,
+        "steps": {"current_A": 5, "voltage_V": 0.8, "ambient_C": 10, "speed_m_s": 0.0005},
+        "max_change": {k: 0 for k in ml.bundle("enhanced")["bounds"]},
+        "orders": [1],
+    }
+    with monkeypatch.context() as patch:
+        patch.setattr(svc, "TASK_TIMEOUT", 0.001)
+        response = client.post("/api/v1/tasks", json=req)
+        assert response.status_code == 202
+        old_id = response.json()["id"]
+        previous = wait_task(client, old_id)
+    assert previous["status"] == "timed_out"
+    assert client.get(f"/api/v1/tasks/{old_id}/exports/all_candidates").status_code == 409
+    response = client.post(f"/api/v1/tasks/{old_id}/retry")
+    assert response.status_code == 202
+    retried = wait_task(client, response.json()["id"])
+    assert retried["status"] == "completed"
+    assert retried["result"]["retry_of"] == old_id
+    assert client.get(f"/api/v1/tasks/{old_id}").json() == previous

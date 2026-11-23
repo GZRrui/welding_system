@@ -9,7 +9,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, update
+from sqlalchemy import case, delete, update
 
 from app.db import Admin, AuditEvent, LoginSession, Session
 
@@ -96,7 +96,7 @@ def require_session(request: Request):
         changed = db.execute(
             update(LoginSession)
             .where(LoginSession.id == session.id, LoginSession.last_seen > now - IDLE)
-            .values(last_seen=now)
+            .values(last_seen=case((LoginSession.last_seen < now, now), else_=LoginSession.last_seen))
         ).rowcount
         if not changed:
             raise HTTPException(401, "会话已失效，请重新登录")
