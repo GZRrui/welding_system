@@ -1,0 +1,109 @@
+name: v0.2 checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_PASSWORD: ci-postgres
+          POSTGRES_DB: welding_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d welding_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      ALGORITHM_ROOT: ${{ github.workspace }}/runtime/ci-algorithm
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: GZRrui/weldingproject_v2
+          ref: 5d1cd2f8c966487b77cc795080c52db0648593bc
+          path: runtime/ci-algorithm
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Backend dependencies and synthetic models
+        working-directory: backend
+        run: |
+          python -m pip install -r requirements.lock.txt playwright==1.56.0
+          PYTHONPATH=. python tests/make_ci_models.py
+          python -m app.model_release --version ci-models --output ../runtime/model-ci
+      - name: Ruff and SQLite tests
+        working-directory: backend
+        run: |
+          ruff check app tests migrations ../deploy
+          pytest -q
+      - name: PostgreSQL migration, import and business tests
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://postgres:ci-postgres@127.0.0.1/welding_ci
+          TEST_IMPORT_DATABASE_URL: postgresql+psycopg://postgres:ci-postgres@127.0.0.1/welding_import
+        run: |
+          python -c 'import psycopg; c = psycopg.connect("postgresql://postgres:ci-postgres@127.0.0.1/postgres", autocommit=True); c.execute("CREATE DATABASE welding_import"); c.close()'
+          pytest -q
+      - name: Frontend lint, tests and production build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm test
+          npm run build
+      - name: Container build and browser core flow
+        env:
+          BROWSER_SMOKE_URL: https://localhost
+          BROWSER_SMOKE_PASSWORD: integration-only-admin
+        run: |
+          python -m playwright install --with-deps chromium
+          umask 077
+          mkdir -p secrets
+          printf '%s\n' ci-pg-admin > secrets/pg_admin_password
+          printf '%s\n' ci-pg-app > secrets/pg_app_password
+          printf '%s\n' ci-pg-migrate > secrets/pg_migration_password
+          printf '%s\n' postgresql+psycopg://welding_app:ci-pg-app@postgres/welding > secrets/app_url
+          printf '%s\n' postgresql+psycopg://welding_migrate:ci-pg-migrate@postgres/welding > secrets/migration_url
+          chmod 644 secrets/pg_* secrets/*_url
+          openssl req -x509 -newkey rsa:2048 -sha256 -noenc -days 1 -subj /CN=localhost \
+            -addext 'subjectAltName=DNS:localhost' -keyout secrets/tls.key -out secrets/tls.crt
+          sudo install -m 644 secrets/tls.crt /usr/local/share/ca-certificates/welding-ci.crt
+          sudo update-ca-certificates
+          sudo apt-get install -y libnss3-tools
+          mkdir -p "$HOME/.pki/nssdb"
+          certutil -N -d "sql:$HOME/.pki/nssdb" --empty-password
+          certutil -A -d "sql:$HOME/.pki/nssdb" -n Welding-CI -t 'C,,' -i secrets/tls.crt
+          chmod -R a+rX runtime/model-ci
+          chmod 644 secrets/tls.crt
+          chmod 755 secrets
+          mkdir -p runtime/import
+          export WELDING_HOST=localhost MODEL_PACKAGE_HOST_DIR="$PWD/runtime/model-ci"
+          export MODEL_MANIFEST_SHA256="$(sha256sum runtime/model-ci/manifest.json | cut -d' ' -f1)"
+          docker compose config --quiet
+          docker compose build api proxy
+          docker compose up -d --wait postgres
+          docker compose run --rm migrate
+          docker compose run --rm -T -e CI_PASSWORD="$BROWSER_SMOKE_PASSWORD" api python -c 'import os; from app.auth import reset_password; reset_password(os.environ["CI_PASSWORD"])'
+          docker compose up -d --wait api proxy
+          python deploy/browser_smoke.py
+          PYTHONPATH=deploy python -c 'import json, os; from pathlib import Path; from smoke import run; print(run("https://localhost", json.loads(Path("runtime/model-ci/golden.json").read_text()), os.environ["BROWSER_SMOKE_PASSWORD"], 180, "secrets/tls.crt"))'
+        working-directory: .

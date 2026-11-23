@@ -1,5 +1,7 @@
 runtime/
 model_registry/
+secrets/
+*.age
 node_modules/
 dist/
 .env

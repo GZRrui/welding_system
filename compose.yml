@@ -1,0 +1,127 @@
+x-logs: &logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-api-image: &api-image
+  image: ${API_IMAGE:-welding-api:0.2.0}
+  build:
+    context: .
+    target: api
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17-bookworm}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: welding
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_admin_password
+    secrets:
+      - pg_admin_password
+      - pg_app_password
+      - pg_migration_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/init-postgres.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    networks: [data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "welding"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logs
+
+  migrate:
+    <<: *api-image
+    profiles: [ops]
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/migration_url
+    secrets: [migration_url]
+    volumes:
+      - ./runtime/import:/import
+    networks: [data]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logs
+
+  api:
+    <<: *api-image
+    init: true
+    restart: unless-stopped
+    environment:
+      DATABASE_URL_FILE: /run/secrets/app_url
+      MODEL_PACKAGE_DIR: /models
+      MODEL_MANIFEST_SHA256: ${MODEL_MANIFEST_SHA256:?set the model manifest fingerprint}
+      SESSION_SECURE: "true"
+      SESSION_IDLE_SECONDS: ${SESSION_IDLE_SECONDS:-1800}
+      SESSION_MAX_SECONDS: ${SESSION_MAX_SECONDS:-28800}
+      LOGIN_FAILURE_LIMIT: ${LOGIN_FAILURE_LIMIT:-5}
+      LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-60}
+      TASK_CAPACITY: ${TASK_CAPACITY:-8}
+      TASK_TIMEOUT_SECONDS: ${TASK_TIMEOUT_SECONDS:-180}
+      LOG_TO_STDOUT: "true"
+      CORS_ORIGINS: https://${WELDING_HOST:?set the HTTPS hostname}
+    secrets: [app_url]
+    volumes:
+      - exports:/opt/welding/runtime/exports
+      - ${MODEL_PACKAGE_HOST_DIR:?set the model release directory}:/models:ro
+    networks: [edge, data]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    logging: *logs
+
+  proxy:
+    image: ${PROXY_IMAGE:-welding-proxy:0.2.0}
+    build:
+      context: .
+      target: proxy
+    restart: unless-stopped
+    environment:
+      WELDING_HOST: ${WELDING_HOST:?set the HTTPS hostname}
+    ports: ["443:443"]
+    secrets: [tls_cert, tls_key]
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    logging: *logs
+
+networks:
+  edge:
+  data:
+    internal: true
+
+volumes:
+  pgdata:
+  exports:
+
+secrets:
+  pg_admin_password:
+    file: ./secrets/pg_admin_password
+  pg_app_password:
+    file: ./secrets/pg_app_password
+  pg_migration_password:
+    file: ./secrets/pg_migration_password
+  app_url:
+    file: ./secrets/app_url
+  migration_url:
+    file: ./secrets/migration_url
+  tls_cert:
+    file: ./secrets/tls.crt
+  tls_key:
+    file: ./secrets/tls.key

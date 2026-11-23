@@ -96,6 +96,13 @@ async function recommend() {
     await loadTask(v.id);
   });
 }
+async function retryTask() {
+  await safe(async () => {
+    const next = await api("tasks/" + task.value.id + "/retry", {}, "POST");
+    localStorage.setItem("task", next.id);
+    await loadTask(next.id);
+  });
+}
 async function loadTask(id: string) {
   task.value = await api("tasks/" + id);
 }
@@ -219,7 +226,7 @@ async function review(c: any) {
 </script>
 <template>
   <header>
-    <b>薄板焊接预测与工艺决策系统</b><span>本地科研原型 · 冷却约90分钟后的最终结果</span>
+    <b>薄板焊接预测与工艺决策系统</b><span>v0.2 内网部署版 · 冷却约90分钟后的最终结果</span>
   </header>
   <div class="shell">
     <aside>
@@ -530,6 +537,12 @@ async function review(c: any) {
               已评价 {{ task.result.manifest.evaluated }}，代理可行
               {{ task.result.manifest.feasible }}
             </p>
+            <el-button
+              v-if="['interrupted', 'failed', 'timed_out'].includes(task.status)"
+              @click="retryTask"
+            >
+              重试任务
+            </el-button>
             <template v-if="task.status === 'completed'">
               <a
                 v-for="kind in [

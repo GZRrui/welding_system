@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -7,7 +8,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app import ml
 from app import services as svc
@@ -16,7 +17,9 @@ from app.core import ORIGINS, ROOT
 from app.db import Batch, Candidate, ModelVersion, Record, Session
 from app.schemas import Prediction, Review, Search, Trend
 
-logging.basicConfig(filename=ROOT / "runtime/logs/backend.log", level=logging.INFO)
+logging.basicConfig(
+    filename=None if os.getenv("LOG_TO_STDOUT") else ROOT / "runtime/logs/backend.log", level=logging.INFO,
+)
 
 
 @asynccontextmanager
@@ -49,7 +52,9 @@ async def trace(request: Request, call_next):
 
 @app.get("/api/v1/health")
 def health():
-    return {"status": "ok"}
+    with Session() as db:
+        db.execute(text("SELECT 1"))
+    return {"status": "ok", "model_release": ml.RELEASE["version"] if ml.RELEASE else None}
 
 
 app.include_router(auth_router)
@@ -146,9 +151,30 @@ def trend(req: Trend):
 def create_task(req: Search, request: Request):
     values = req.model_dump()
     svc.validate_search(values)
-    rid = svc.save("decision", values, {}, "queued", request=request)
-    svc.pool.submit(svc.execute, rid, values)
+    return enqueue(values, request)
+
+
+def enqueue(values, request, retry_of=None):
+    try:
+        rid = svc.enqueue(values, request, retry_of)
+    except svc.QueueFull as exc:
+        raise HTTPException(429, "推荐队列已满，请稍后再试") from exc
     return {"id": rid, "status": "queued"}
+
+
+@business.post("/api/v1/tasks/{rid}/retry", status_code=202)
+def retry_task(rid: str, request: Request):
+    with Session() as db:
+        record = db.get(Record, rid)
+        if not record or record.kind != "decision":
+            raise HTTPException(404, "推荐任务不存在")
+        if record.status not in {"interrupted", "failed", "timed_out"}:
+            raise HTTPException(409, "该状态不支持重试")
+        values = record.request
+        if record.model_id != ml.RUNS.get(values["model"]) or record.tolerance_id != ml.TV:
+            raise HTTPException(409, "原模型或容差版本未安装，请使用当前版本新建任务")
+    svc.validate_search(values)
+    return enqueue(values, request, rid)
 
 
 @business.get("/api/v1/history")
@@ -185,7 +211,8 @@ def review(cid: str, req: Review, request: Request):
 
 @business.get("/api/v1/tasks/{rid}/exports/{kind}")
 def export(rid: str, kind: str, request: Request):
-    task(rid)
+    if task(rid)["status"] != "completed":
+        raise HTTPException(409, "结果尚未生成")
     allowed = {"recommendations", "ansys_verification_queue", "all_candidates"}
     if kind not in allowed:
         raise HTTPException(404)
