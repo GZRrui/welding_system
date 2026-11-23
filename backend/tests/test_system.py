@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app import ml
 from app import services as svc
+from app.auth import reset_password
 from app.main import app
 
 CURRENT = dict(current_A=210, voltage_V=27.2, ambient_C=80, speed_m_s=0.006, process_order=1)
@@ -11,7 +12,11 @@ CURRENT = dict(current_A=210, voltage_V=27.2, ambient_C=80, speed_m_s=0.006, pro
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:
+    reset_password("test password for admin")
+    with TestClient(app, base_url="https://testserver") as c:
+        result = c.post("/api/v1/auth/login", json={"username": "admin", "password": "test password for admin"})
+        assert result.status_code == 200
+        c.headers["X-CSRF-Token"] = result.json()["csrf_token"]
         yield c
 
 

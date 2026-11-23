@@ -4,6 +4,8 @@
 
 详细步骤、逐页操作和排错见 [本地使用手册](docs/user_guide.md)。日常使用无需重复安装依赖。
 
+下一版为 [v0.2 内网部署版](docs/v0.2.md)。
+
 ## 启动
 
 后端复用 `D:/miniconda3/envs/mywelding/python.exe`；前端 Node 22。后端完整依赖见 `backend/requirements.lock.txt`，前端用 `npm ci` 恢复锁文件依赖。
@@ -16,6 +18,8 @@ npm ci
 cd ..
 powershell -ExecutionPolicy Bypass -File scripts/start.ps1
 ```
+
+首次启动前按 [管理员初始化](docs/v0.2.md#初始化和重置管理员) 设置密码。
 
 访问 http://127.0.0.1:5173 ，OpenAPI http://127.0.0.1:8000/docs 。停止使用 `scripts/stop.ps1`，只停止脚本登记的进程。日志 `runtime/logs`，数据库 `runtime/db/system.db`，导出 `runtime/exports/<任务UUID>`。启动前确保8000/5173空闲，禁止同一数据库多实例运行。
 

@@ -4,13 +4,14 @@ import uuid
 from contextlib import asynccontextmanager
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import func, select
 
 from app import ml
 from app import services as svc
+from app.auth import audit, require_session, router as auth_router
 from app.core import ORIGINS, ROOT
 from app.db import Batch, Candidate, ModelVersion, Record, Session
 from app.schemas import Prediction, Review, Search, Trend
@@ -24,9 +25,9 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="薄板焊接预测与工艺决策系统", version="1.0", lifespan=lifespan)
+app = FastAPI(title="薄板焊接预测与工艺决策系统", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
-    CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type"]
+    CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type", "X-CSRF-Token"]
 )
 
 
@@ -51,12 +52,16 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/api/v1/config")
+app.include_router(auth_router)
+business = APIRouter(dependencies=[Depends(require_session)])
+
+
+@business.get("/api/v1/config")
 def config(model: str = "enhanced"):
     return {"bounds": ml.bundle(model)["bounds"], "tolerances": ml.TOL, "tolerance_version": ml.TV, "limits": ml.LIMITS}
 
 
-@app.get("/api/v1/models")
+@business.get("/api/v1/models")
 def models():
     result = []
     with Session() as db:
@@ -75,7 +80,7 @@ def models():
     return result
 
 
-@app.get("/api/v1/overview")
+@business.get("/api/v1/overview")
 def overview():
     with Session() as db:
         return {
@@ -90,14 +95,14 @@ def overview():
         }
 
 
-@app.post("/api/v1/predict")
-def predict(req: Prediction):
+@business.post("/api/v1/predict")
+def predict(req: Prediction, request: Request):
     result = ml.predict(req.model, req.current.model_dump())
-    result["id"] = svc.save("prediction", req.model_dump(), result)
+    result["id"] = svc.save("prediction", req.model_dump(), result, request=request)
     return result
 
 
-@app.post("/api/v1/compare")
+@business.post("/api/v1/compare")
 def compare(req: Prediction):
     results = [ml.predict(req.model, dict(req.current.model_dump(), process_order=o)) for o in (1, 2)]
     return {
@@ -110,7 +115,7 @@ def compare(req: Prediction):
     }
 
 
-@app.post("/api/v1/trend")
+@business.post("/api/v1/trend")
 def trend(req: Trend):
     current = req.current.model_dump()
     ml.predict(req.model, current)
@@ -137,22 +142,22 @@ def trend(req: Trend):
     }
 
 
-@app.post("/api/v1/tasks", status_code=202)
-def create_task(req: Search):
+@business.post("/api/v1/tasks", status_code=202)
+def create_task(req: Search, request: Request):
     values = req.model_dump()
     svc.validate_search(values)
-    rid = svc.save("decision", values, {}, "queued")
+    rid = svc.save("decision", values, {}, "queued", request=request)
     svc.pool.submit(svc.execute, rid, values)
     return {"id": rid, "status": "queued"}
 
 
-@app.get("/api/v1/history")
+@business.get("/api/v1/history")
 def history():
     with Session() as db:
         return [svc.serialize(r) for r in db.scalars(select(Record).order_by(Record.created.desc()).limit(200))]
 
 
-@app.get("/api/v1/tasks/{rid}")
+@business.get("/api/v1/tasks/{rid}")
 def task(rid: str):
     with Session() as db:
         r = db.get(Record, rid)
@@ -167,18 +172,19 @@ def task(rid: str):
         )
 
 
-@app.patch("/api/v1/candidates/{cid}")
-def review(cid: str, req: Review):
+@business.patch("/api/v1/candidates/{cid}")
+def review(cid: str, req: Review, request: Request):
     with Session.begin() as db:
         c = db.get(Candidate, cid)
         if not c:
             raise HTTPException(404, "候选不存在")
         c.review_status, c.notes = req.status, req.notes
+        audit(db, "review", "ok", request, cid)
     return {"status": req.status}
 
 
-@app.get("/api/v1/tasks/{rid}/exports/{kind}")
-def export(rid: str, kind: str):
+@business.get("/api/v1/tasks/{rid}/exports/{kind}")
+def export(rid: str, kind: str, request: Request):
     task(rid)
     allowed = {"recommendations", "ansys_verification_queue", "all_candidates"}
     if kind not in allowed:
@@ -186,4 +192,9 @@ def export(rid: str, kind: str):
     path = ROOT / "runtime/exports" / rid / (kind + ".csv")
     if not path.is_file():
         raise HTTPException(409, "结果尚未生成")
+    with Session.begin() as db:
+        audit(db, "export", "ok", request, f"{rid}/{kind}")
     return FileResponse(path, filename=kind + ".csv", media_type="text/csv")
+
+
+app.include_router(business)
