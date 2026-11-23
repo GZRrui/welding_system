@@ -27,6 +27,7 @@ if($apiPort){
 }else{
  Push-Location "$root/backend"
  try{& $Python -m alembic upgrade head;if($LASTEXITCODE -ne 0){throw '数据库迁移失败'}}finally{Pop-Location}
+ $env:SESSION_SECURE="false"
  $api=Start-Process $Python -ArgumentList '-m uvicorn app.main:app --host 127.0.0.1 --port 8000' -WorkingDirectory "$root/backend" -WindowStyle Hidden -RedirectStandardOutput "$logs/api.stdout.log" -RedirectStandardError "$logs/api.stderr.log" -PassThru
  Remember 'api' $api
  $managed|ConvertTo-Json|Set-Content $statePath

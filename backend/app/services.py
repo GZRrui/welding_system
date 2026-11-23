@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy import select
 
 from app import ml
+from app.auth import audit
 from app.core import ROOT
 from app.db import Batch, Candidate, ModelVersion, Record, Session, Tolerance
 
@@ -45,7 +46,7 @@ def register():
             task.result = {"error": "服务重启中断任务，请重新提交；历史不会自动重算"}
 
 
-def save(kind, req, result, status="completed"):
+def save(kind, req, result, status="completed", request=None):
     rid = str(uuid.uuid4())
     with Session.begin() as db:
         db.add(
@@ -59,6 +60,8 @@ def save(kind, req, result, status="completed"):
                 status=status,
             )
         )
+        if request is not None:
+            audit(db, kind, "ok", request, rid)
     return rid
 
 
