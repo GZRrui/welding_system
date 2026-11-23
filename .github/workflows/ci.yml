@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   regression:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:
@@ -88,7 +88,7 @@ jobs:
             -addext 'subjectAltName=DNS:localhost' -keyout secrets/tls.key -out secrets/tls.crt
           sudo install -m 644 secrets/tls.crt /usr/local/share/ca-certificates/welding-ci.crt
           sudo update-ca-certificates
-          sudo apt-get install -y libnss3-tools
+          sudo apt-get install -y age libnss3-tools
           mkdir -p "$HOME/.pki/nssdb"
           certutil -N -d "sql:$HOME/.pki/nssdb" --empty-password
           certutil -A -d "sql:$HOME/.pki/nssdb" -n Welding-CI -t 'C,,' -i secrets/tls.crt
@@ -106,4 +106,26 @@ jobs:
           docker compose up -d --wait api proxy
           python deploy/browser_smoke.py
           PYTHONPATH=deploy python -c 'import json, os; from pathlib import Path; from smoke import run; print(run("https://localhost", json.loads(Path("runtime/model-ci/golden.json").read_text()), os.environ["BROWSER_SMOKE_PASSWORD"], 180, "secrets/tls.crt"))'
+          mkdir -p runtime/recovery
+          age-keygen -o runtime/recovery/key
+          backup=runtime/recovery/backup.tar.age
+          sh deploy/backup.sh "$MODEL_PACKAGE_HOST_DIR" "$(age-keygen -y runtime/recovery/key)" "$backup"
+          age -d -i runtime/recovery/key -o runtime/recovery/payload.tar "$backup"
+          tar -C runtime/recovery -xf runtime/recovery/payload.tar
+          mkdir runtime/recovery/model runtime/recovery/exports
+          tar -C runtime/recovery/model -xf runtime/recovery/model.tar
+          tar -C runtime/recovery/exports -xf runtime/recovery/exports.tar
+          cmp runtime/model-ci/manifest.json runtime/recovery/model/manifest.json
+          test "$(find runtime/recovery/exports -name all_candidates.csv | wc -l)" -ge 2
+          docker compose exec -T postgres createdb -U postgres welding_restore_ci
+          docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U postgres -d welding_restore_ci \
+            -c 'ALTER SCHEMA public OWNER TO welding_migrate; REVOKE ALL ON SCHEMA public FROM PUBLIC; GRANT USAGE ON SCHEMA public TO welding_app'
+          docker compose exec -T postgres pg_restore -U postgres -d welding_restore_ci \
+            --exit-on-error --single-transaction < runtime/recovery/welding.dump
+          for table in model_versions tolerances batches records candidates; do
+            query="SELECT row_to_json(row) FROM $table AS row ORDER BY id"
+            docker compose exec -T postgres psql -XAt -U postgres -d welding -c "$query" > runtime/recovery/source.jsonl
+            docker compose exec -T postgres psql -XAt -U postgres -d welding_restore_ci -c "$query" > runtime/recovery/restored.jsonl
+            cmp runtime/recovery/source.jsonl runtime/recovery/restored.jsonl
+          done
         working-directory: .
