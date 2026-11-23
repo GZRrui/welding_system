@@ -15,7 +15,7 @@ cd D:\Welding\welding_system
 powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
 ```
 
-等待“服务检查通过”后打开 http://127.0.0.1:5173 。首次加载图表可能需要数秒。看到左侧六个功能入口、系统概览与真实样本数，才算页面启动成功。不要通过双击index.html运行。
+等待“服务检查通过”后打开 http://127.0.0.1:5173 ，使用管理员账户登录。首次运行 v0.2 前按[管理员初始化说明](v0.2.md#初始化和重置管理员)设置密码。首次加载图表可能需要数秒。看到左侧六个功能入口、系统概览与真实样本数，才算页面启动成功。不要通过双击index.html运行。
 
 脚本隐藏启动窗口，可关闭启动终端，后台服务仍运行。重复执行将复用已经运行的本系统服务；若是其他服务占端口则报错，不会强制结束它。脚本不会自动打开浏览器。
 
@@ -97,7 +97,7 @@ npm run dev -- --port 5173 --strictPort
 7. 导出recommendations为推荐表，ansys_verification_queue为新工况复核队列，all_candidates为全部候选。CSV使用原始SI单位，位移m、速度m/s。
 8. 获得真实ANSYS复核依据后，选择复核状态、输入备注并保存。人工登记“已复核”不等于实验验证或产品验收。
 
-候选最多20,000；过密网格会被拒绝。中断任务不自动恢复计算，重新提交会产生新任务。
+候选最多 20,000。中断、失败或超时任务可点“重试任务”，重试会保留原记录并生成新的任务 ID。
 
 ## 8. 模型与历史
 
@@ -115,7 +115,7 @@ npm run dev -- --port 5173 --strictPort
 |界面出现500或模型加载失败|查看backend.log与api.stderr.log，确认原算法目录存在，使用mywelding解释器|
 |422 / Outside trained bounds|参数超范围或格式非法，按配置范围输入|
 |候选规模过大|增大步长、缩小调整幅度或锁定更多参数|
-|interrupted|服务重启中断任务，需要手动新建任务|
+|interrupted / timed_out / failed|任务已结束，可在任务详情显式重试|
 
 日志位于 D:\Welding\welding_system\runtime\logs：ui.stdout.log/ui.stderr.log是前端，api.stdout.log/api.stderr.log是后端启动，backend.log记录请求与任务错误。一键启动会重用这些文件，排错时可先另存旧日志。
 
@@ -123,4 +123,4 @@ npm run dev -- --port 5173 --strictPort
 
 数据库runtime/db/system.db保存历史与复核信息，不要当缓存删除。导出位于runtime/exports/<任务ID>。模型及仿真CSV仍在原算法目录；不要移动、覆盖原模型目录。默认路径由项目相邻关系解析；迁移电脑通过ALGORITHM_ROOT配置。
 
-.env.example仅是示例，不自动加载；在启动终端使用 `$env:ALGORITHM_ROOT='新目录'` 设置后再启动。本系统仅监听本机，不需要登录。运行范围与未完成事项见docs/acceptance.md。
+.env.example仅是示例，不自动加载；在启动终端使用 `$env:ALGORITHM_ROOT='新目录'` 设置后再启动。Windows 启停脚本监听本机，使用管理员登录。内网发布见 [Linux 容器部署](deploy.md)。
