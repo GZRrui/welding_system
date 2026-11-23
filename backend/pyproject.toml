@@ -2,7 +2,7 @@
 name = "welding-system"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["fastapi", "uvicorn", "sqlalchemy>=2", "alembic", "pydantic>=2", "numpy", "pandas", "scikit-learn", "xgboost", "joblib"]
+dependencies = ["fastapi", "uvicorn", "sqlalchemy>=2", "alembic", "pydantic>=2", "numpy", "pandas", "scikit-learn", "xgboost", "joblib", "argon2-cffi", "psycopg[binary]"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 [tool.ruff]

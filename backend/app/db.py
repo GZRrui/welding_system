@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, BigInteger, CheckConstraint, ForeignKey, String, create_engine
+from sqlalchemy import JSON, BigInteger, CheckConstraint, ForeignKey, String, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from app.core import DATABASE_URL
@@ -77,4 +77,10 @@ class AuditEvent(Base):
 
 
 engine = create_engine(DATABASE_URL)
+if engine.dialect.name == "sqlite":
+    @event.listens_for(engine, "connect")
+    def enable_sqlite_foreign_keys(connection, _):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+
 Session = sessionmaker(engine, expire_on_commit=False)
